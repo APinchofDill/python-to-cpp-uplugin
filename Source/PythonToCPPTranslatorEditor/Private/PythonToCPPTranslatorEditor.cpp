@@ -84,7 +84,7 @@ TSharedRef<FExtender> FPythonToCPPTranslatorEditorModule::OnExtendContentBrowser
                 }));
 
                 MenuBuilder.AddMenuEntry(
-                    LOCTEXT("ConvertUAssetToCpp_Label", "Sample - Content Menu Item"),
+                    LOCTEXT("ConvertUAssetToCpp_Label", "Convert selected file to c++"),
                     LOCTEXT("ConvertUAssetToCpp_Tooltip", "Converts the selected UAsset to a C++ class"),
                     FSlateIcon(),
                     MenuAction
@@ -98,28 +98,151 @@ TSharedRef<FExtender> FPythonToCPPTranslatorEditorModule::OnExtendContentBrowser
 
 void FPythonToCPPTranslatorEditorModule::OnConvertUAssetToCpp(TArray<FAssetData> SelectedAssets)
 {
-    // Example implementation - you would expand this based on your needs
     for (const FAssetData& Asset : SelectedAssets)
     {
         FString AssetName = Asset.AssetName.ToString();
         FString AssetClass = Asset.GetClass()->GetName();
         
-        // Create the C++ class name
-        FString ClassName = FString::Printf(TEXT("%s_Cpp"), *AssetName);
-        
-        // Here you would implement the actual conversion logic
-        // This could include:
-        // 1. Creating a new C++ class
-        // 2. Copying relevant properties from the asset
-        // 3. Setting up inheritance
-        // 4. Generating necessary code
-        
-        FMessageDialog::Open(EAppMsgType::Ok, 
-            FText::Format(LOCTEXT("ConvertSuccess", "Converting {0} of type {1} to C++"), 
-                FText::FromString(AssetName), 
-                FText::FromString(AssetClass)));
+        FString FilePath;
+        if (!Asset.GetTagValue("FilePath", FilePath))
+        {
+            // Fallback for physical files
+            FString PackagePath = Asset.PackageName.ToString(); 
+            FString FullPath = FPackageName::LongPackageNameToFilename(PackagePath, FPackageName::GetAssetPackageExtension());
+            FullPath = FPaths::ChangeExtension(FullPath, TEXT("py"));
+            FilePath = FullPath;
+        }
+
+        FPaths::NormalizeFilename(FilePath);
+        FilePath = FPaths::ConvertRelativePathToFull(FilePath);
+
+        if (!FPaths::FileExists(FilePath))
+        {
+            FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(FString::Printf(TEXT("Python file not found: %s"), *FilePath)));
+            continue;
+        }
+
+        FString PythonContent;
+        if (!FFileHelper::LoadFileToString(PythonContent, *FilePath))
+        {
+            FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("PythonLoadFail", "Failed to load the Python file."));
+            continue;
+        }
+
+        // === Parse Python ===
+        FString ClassName = AssetName;
+        TArray<FString> Lines;
+        PythonContent.ParseIntoArrayLines(Lines);
+
+        FString TickBody;
+        FString BeginPlayBody;
+        TArray<FString> Properties;
+
+        for (const FString& Line : Lines)
+        {
+            if (Line.StartsWith("#@actor"))
+            {
+                ClassName = Line.Replace(TEXT("#@actor "), TEXT("")).TrimStartAndEnd();
+            }
+            else if (Line.StartsWith("#@property"))
+            {
+                FString PropertyLine = Line.Replace(TEXT("#@property "), TEXT("")).TrimStartAndEnd();
+                Properties.Add(PropertyLine);
+            }
+            else if (Line.StartsWith("#@function"))
+            {
+                if (Line.Contains("BeginPlay"))
+                {
+                    // Next line is assumed to be print or logic
+                    int32 Index = Lines.Find(Line);
+                    if (Lines.IsValidIndex(Index + 1))
+                    {
+                        BeginPlayBody = Lines[Index + 1].TrimStartAndEnd();
+                    }
+                }
+            }
+            else if (Line.StartsWith("#@tick"))
+            {
+                int32 Index = Lines.Find(Line);
+                if (Lines.IsValidIndex(Index + 1))
+                {
+                    TickBody = Lines[Index + 1].TrimStartAndEnd();
+                }
+            }
+        }
+
+        // === Generate Header ===
+        FString HeaderText = FString::Printf(TEXT(
+            "#pragma once\n\n"
+            "#include \"CoreMinimal.h\"\n"
+            "#include \"GameFramework/Actor.h\"\n"
+            "#include \"%s.generated.h\"\n\n"
+            "UCLASS()\n"
+            "class YOURPROJECT_API A%s : public AActor\n"
+            "{\n"
+            "    GENERATED_BODY()\n\n"
+            "public:\n"
+            "    A%s();\n\n"
+            "protected:\n"
+            "    virtual void BeginPlay() override;\n\n"
+            "public:\n"
+            "    virtual void Tick(float DeltaTime) override;\n\n"
+            "private:\n"
+        ), *ClassName, *ClassName, *ClassName);
+
+        for (const FString& Prop : Properties)
+        {
+            HeaderText += FString::Printf(TEXT("    UPROPERTY(EditAnywhere)\n    %s;\n\n"), *Prop);
+        }
+
+        HeaderText += TEXT("    FVector Location;\n};\n");
+
+        // === Generate Source ===
+        FString SourceText = FString::Printf(TEXT(
+            "#include \"%s.h\"\n\n"
+            "A%s::A%s()\n"
+            "{\n"
+            "    PrimaryActorTick.bCanEverTick = true;\n"
+            "}\n\n"
+            "void A%s::BeginPlay()\n"
+            "{\n"
+            "    Super::BeginPlay();\n"
+            "    Location = GetActorLocation();\n"
+            "    UE_LOG(LogTemp, Log, TEXT(\"%s\"));\n"
+            "}\n\n"
+            "void A%s::Tick(float DeltaTime)\n"
+            "{\n"
+            "    Super::Tick(DeltaTime);\n"
+            "    %s;\n"
+            "}\n"
+        ),
+            *ClassName, *ClassName, *ClassName,
+            *ClassName, *BeginPlayBody,
+            *ClassName, *TickBody
+        );
+
+        // === Save Files ===
+        FString SaveDir = FPaths::ProjectDir() / TEXT("Source/") / FApp::GetProjectName() / TEXT("GeneratedActors/");
+        IFileManager::Get().MakeDirectory(*SaveDir, true);
+
+        FString HeaderPath = SaveDir / (ClassName + TEXT(".h"));
+        FString SourcePath = SaveDir / (ClassName + TEXT(".cpp"));
+
+        bool bHeaderSaved = FFileHelper::SaveStringToFile(HeaderText, *HeaderPath);
+        bool bSourceSaved = FFileHelper::SaveStringToFile(SourceText, *SourcePath);
+
+        if (bHeaderSaved && bSourceSaved)
+        {
+            FMessageDialog::Open(EAppMsgType::Ok,
+                FText::Format(LOCTEXT("ConvertSuccess", "Successfully generated C++ files for: {0}"), FText::FromString(ClassName)));
+        }
+        else
+        {
+            FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("FileSaveFail", "Failed to save one or both generated files."));
+        }
     }
 }
+
 
 #undef LOCTEXT_NAMESPACE
 
