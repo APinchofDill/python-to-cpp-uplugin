@@ -4,31 +4,24 @@
 
 UPythonAssetFactory::UPythonAssetFactory()
 {
-    SupportedClass = UPythonScript::StaticClass();
+    bCreateNew = false;
     bEditorImport = true;
-
+    SupportedClass = UPythonScript::StaticClass();
     Formats.Add(TEXT("py;Python Script"));
 }
 
-UObject* UPythonAssetFactory::FactoryCreateFile(UClass* InClass, UObject* InParent, FName InName, EObjectFlags Flags,
-                                                const FString& Filename, const TCHAR* Parms, FFeedbackContext* Warn,
-                                                bool& bOutOperationCanceled)
+UObject* UPythonAssetFactory::FactoryCreateFile(UClass* InClass, UObject* InParent, FName InName,
+    EObjectFlags Flags, const FString& Filename, const TCHAR* Parms,
+    FFeedbackContext* Warn, bool& bOutOperationCanceled)
 {
-    // Load the Python file content
-    FString FileContent;
-    if (!FFileHelper::LoadFileToString(FileContent, *Filename))
+    FString FileContents;
+    if (!FFileHelper::LoadFileToString(FileContents, *Filename))
     {
-        Warn->Logf(ELogVerbosity::Error, TEXT("Failed to load Python file: %s"), *Filename);
-        bOutOperationCanceled = true;
+        UE_LOG(LogTemp, Error, TEXT("Failed to read file: %s"), *Filename);
         return nullptr;
     }
 
-    // Create the PythonScript object
-    UPythonScript* PythonScript = NewObject<UPythonScript>(InParent, InClass, InName, Flags);
-    if (PythonScript)
-    {
-        PythonScript->ScriptContent = FileContent;
-    }
-
-    return PythonScript;
+    UPythonScript* NewScript = NewObject<UPythonScript>(InParent, InClass, InName, Flags);
+    NewScript->ScriptContent = FileContents;
+    return NewScript;
 }

@@ -10,6 +10,6 @@ class PYTHONTOCPPTRANSLATOREDITOR_API UPythonScript : public UObject
     GENERATED_BODY()
 
 public:
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Python")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Text")
     FString ScriptContent;
 };

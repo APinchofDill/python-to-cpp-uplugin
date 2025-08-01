@@ -6,6 +6,7 @@
 #include "AssetToolsModule.h"
 #include "IAssetTools.h"
 #include "Modules/ModuleManager.h"
+#include "PythonScript.h"
 
 #define LOCTEXT_NAMESPACE "FPythonToCPPTranslatorEditorModule"
 
@@ -100,37 +101,31 @@ void FPythonToCPPTranslatorEditorModule::OnConvertUAssetToCpp(TArray<FAssetData>
 {
     for (const FAssetData& Asset : SelectedAssets)
     {
-        FString AssetName = Asset.AssetName.ToString();
-        FString AssetClass = Asset.GetClass()->GetName();
-        
-        FString FilePath;
-        if (!Asset.GetTagValue("FilePath", FilePath))
+        UObject* AssetObject = Asset.GetAsset();
+        if (!AssetObject)
         {
-            // Fallback for physical files
-            FString PackagePath = Asset.PackageName.ToString(); 
-            FString FullPath = FPackageName::LongPackageNameToFilename(PackagePath, FPackageName::GetAssetPackageExtension());
-            FullPath = FPaths::ChangeExtension(FullPath, TEXT("py"));
-            FilePath = FullPath;
-        }
-
-        FPaths::NormalizeFilename(FilePath);
-        FilePath = FPaths::ConvertRelativePathToFull(FilePath);
-
-        if (!FPaths::FileExists(FilePath))
-        {
-            FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(FString::Printf(TEXT("Python file not found: %s"), *FilePath)));
+            UE_LOG(LogTemp, Error, TEXT("Could not load asset: %s"), *Asset.AssetName.ToString());
             continue;
         }
 
-        FString PythonContent;
-        if (!FFileHelper::LoadFileToString(PythonContent, *FilePath))
+        UPythonScript* PythonAsset = Cast<UPythonScript>(AssetObject);
+        if (!PythonAsset)
         {
-            FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("PythonLoadFail", "Failed to load the Python file."));
+            FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(
+                FString::Printf(TEXT("Selected asset is not a UPythonScript: %s"), *Asset.AssetName.ToString())));
+            continue;
+        }
+
+        FString PythonContent = PythonAsset->ScriptContent;
+        if (PythonContent.IsEmpty())
+        {
+            FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(
+                FString::Printf(TEXT("Script content is empty for asset: %s"), *Asset.AssetName.ToString())));
             continue;
         }
 
         // === Parse Python ===
-        FString ClassName = AssetName;
+        FString ClassName = Asset.AssetName.ToString();
         TArray<FString> Lines;
         PythonContent.ParseIntoArrayLines(Lines);
 
