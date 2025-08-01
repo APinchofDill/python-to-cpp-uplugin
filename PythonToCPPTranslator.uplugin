@@ -1,0 +1,21 @@
+{
+  "FileVersion": 3,
+  "Version": 1,
+  "VersionName": "1.0",
+  "FriendlyName": "Python To C++ Translator",
+  "Description": "A plugin to translate Python files into Unreal Engine C++ code.",
+  "Category": "Scripting",
+  "CreatedBy": "APinchofDill",
+  "Modules": [
+    {
+      "Name": "PythonToCPPTranslator",
+      "Type": "Runtime",
+      "LoadingPhase": "Default"
+    },
+    {
+      "Name": "PythonToCPPTranslatorEditor",
+      "Type": "Editor",
+      "LoadingPhase": "Default"
+    }
+  ]
+}
